@@ -1,0 +1,7 @@
+spring:
+    application:
+        name: ssfs
+
+ssfs:
+    path: ${user.home}/ssfs8080
+    backupUrl: http://localhost:8081/upload
