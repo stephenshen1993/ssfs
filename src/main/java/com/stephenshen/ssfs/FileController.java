@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.SneakyThrows;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.util.DigestUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -12,7 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
-import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static com.stephenshen.ssfs.HttpSyncer.X_FILE_NAME;
 
@@ -33,10 +35,14 @@ public class FileController {
     @Autowired
     private HttpSyncer httpSyncer;
 
+    @Value("${ssfs.autoMd5}")
+    private boolean autoMd5;
+
     @SneakyThrows
     @PostMapping("/upload")
     public String upload(@RequestParam("file") MultipartFile file,
                          HttpServletRequest request) {
+        // 1、处理文件
         boolean needSync = false;
         String fileName = request.getHeader(X_FILE_NAME);
         if (fileName == null || fileName.isEmpty()) {
@@ -48,7 +54,23 @@ public class FileController {
         File dest = new File(uploadPath + "/" + subDir + "/" + fileName);
         file.transferTo(dest);
 
-        // 同步文件到backup
+        // 2、处理meta
+        FileMeta meta = new FileMeta();
+        meta.setName(fileName);
+        meta.setOriginalFileName(file.getOriginalFilename());
+        meta.setSize(file.getSize());
+        if (autoMd5) {
+            meta.getTags().put("md5", DigestUtils.md5DigestAsHex(new FileInputStream(dest)));
+        }
+
+        // 2.1 存放到本地文件
+        String metaName = fileName + ".meta";
+        File metaFile = new File(uploadPath + "/" + subDir + "/" + metaName);
+        FileUtils.writeMeta(metaFile, meta);
+        // 2.2 存放到数据库
+        // 2.3 存放到配置中心或注册中心
+
+        // 3、同步文件到backup
         if (needSync) {
             httpSyncer.sync(dest, backupUrl);
         }
@@ -81,6 +103,17 @@ public class FileController {
             outputStream.flush();
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    @RequestMapping("/meta")
+    public String meta(String name) {
+        String subDir = FileUtils.getSubDir(name);
+        String path = uploadPath + "/" + subDir + "/" + name + ".meta";
+        try {
+            return Files.readString(Path.of(path));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 }
